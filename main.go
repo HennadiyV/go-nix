@@ -24,42 +24,52 @@ func postCreateFromJson(b []byte) (p Post, err error) {
 
 	err = json.Unmarshal(b, &p)
 	if err != nil {
-
 		return p, err
 	}
 	return p, err
+}
 
+type InputField struct {
+	Url, Dir, Pattern string
+	ch                chan []byte
+	SaveKey           bool // true - In file save key and value
 }
 
 func main() {
 
-	url := "https://jsonplaceholder.typicode.com/posts"
-	dir := "storage/posts/"
-	pattern := "*.txt"
-	countPost := 100
+	ch := make(chan []byte)
+	inputfild := InputField{
+
+		"https://jsonplaceholder.typicode.com/posts",
+		"storage/posts/",
+		"*.txt",
+		ch,
+		true,
+	}
+
+	countPost := 10
 
 	errorLog := log.New(os.Stderr, "ERROR\t", log.Ldate|log.Ltime|log.Lshortfile)
-	err := os.MkdirAll(dir, 0777)
+	err := os.MkdirAll(inputfild.Dir, 0777)
 	if err != nil {
 		errorLog.Fatal(err)
 	}
 	var wg sync.WaitGroup
-	ch := make(chan []byte)
 
 	for i := 1; i <= countPost; i++ {
 		wg.Add(2)
-		go getPostToChanel(ch, &url, i, &wg, errorLog)
-		go savePostToFile(ch, dir+pattern, &wg, errorLog)
+		go inputfild.getPostToChanel(i, &wg, errorLog)
+		go inputfild.savePostToFile(&wg, errorLog)
 	}
 	wg.Wait()
 
 }
 
-func getPostToChanel(c chan []byte, purl *string, postId int, pwg *sync.WaitGroup, errorLog *log.Logger) {
+func (i *InputField) getPostToChanel(count int, pwg *sync.WaitGroup, errorLog *log.Logger) {
 
 	defer pwg.Done()
-	url := *purl
-	url = url + "/" + strconv.Itoa(postId)
+	url := i.Url
+	url = url + "/" + strconv.Itoa(count)
 
 	resp, err := http.Get(url)
 
@@ -75,26 +85,35 @@ func getPostToChanel(c chan []byte, purl *string, postId int, pwg *sync.WaitGrou
 		return
 	}
 
-	c <- bresp
+	i.ch <- bresp
 
 }
-func savePostToFile(c chan []byte, pattern string, pwg *sync.WaitGroup, errorLog *log.Logger) {
+func (i *InputField) savePostToFile(pwg *sync.WaitGroup, errorLog *log.Logger) {
 
 	defer pwg.Done()
+	ch := <-i.ch
 
-	post, err := postCreateFromJson(<-c)
+	post, err := postCreateFromJson(ch)
 	if err != nil {
 		errorLog.Print(err)
 		return
 	}
-	bpost := []byte(fmt.Sprint(post))
-	strid := strconv.Itoa(post.Id)
-	fileName := strings.Replace(pattern, "*", strid, 1)
 
+	strid := strconv.Itoa(post.Id)
+	fileName := strings.Replace(i.Pattern, "*", strid, 1)
+	if i.SaveKey {
+		err = ioutil.WriteFile(fileName, ch, 0777)
+		if err != nil {
+			errorLog.Print(err)
+
+		}
+		return
+	}
+	bpost := []byte(fmt.Sprint(post))
 	err = ioutil.WriteFile(fileName, bpost, 0777)
 	if err != nil {
 		errorLog.Print(err)
-		return
+
 	}
 
 }
